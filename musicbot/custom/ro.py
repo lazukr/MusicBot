@@ -6,13 +6,19 @@ import asyncio
 import concurrent.futures
 import time
 
-
 from .common import *
 from lxml import html
 from functools import partial
 
+
+# links
 RO_MOB_SEARCH_PAGE = 'http://www.divine-pride.net/database/monster?Name=&Map=&Item=&Scale=&Element=&Race=&minLevel=1&maxLevel=200&minFlee=1&maxFlee=800&minHit=1&maxHit=1600&Flag=&Page=1'
 API_LINK = 'http://www.divine-pride.net/api/database/DBTYPE/ID?apiKey=MYKEY'
+LOGIN_URL = "https://www.novaragnarok.com/?module=account&action=login"
+VEND_URL = "https://www.novaragnarok.com/?module=vending&action=@action&id=@id&refine_op=@rop&refine=@rfn&p=@page"
+VEND_ITEM_URL = "https://www.novaragnarok.com/?module=item&action=index&name=@name&type=-1"
+
+# mappings
 RACE_MAP = {
                 '0': 'Formless',
                 '1': 'Undead',
@@ -78,12 +84,28 @@ SCALE_MAP = {
             'large': '2'
         }
 
+# constants
 DROP_RATE_MAX = 100
 
-KEY = open(os.path.join(os.path.dirname(__file__), 'key.txt')).read().split('=')[1].strip()
+with open(os.path.join(os.path.dirname(__file__), 'key.txt')) as f:
+    KEY = f.readline().split('=')[1].strip()
+    USERNAME = f.readline().split('=')[1].strip()
+    PASSWORD = f.readline().split('=')[1].strip()
+    SERVER = f.readline().split('=')[1].strip()
+
 
 if not KEY:
     print("WARNING: Divine Pride RO API will not work without a key")
+
+if not USERNAME or not PASSWORD or not SERVER:
+    print("WARNING: lack of username, password, server will result in market search not working.")
+
+login_info = {
+    "username": USERNAME, 
+    "password": PASSWORD,
+    "server": SERVER
+}
+
 
 async def cmd_ms(self, channel, author, leftover_args):
     """ 
@@ -424,4 +446,151 @@ async def cmd_sig(self, channel, author, leftover_args):
 
             reply_text += sig_link + char_name + '/' + sig_bg_val + '/' + sig_pose_val + '?' + str(round(time.time())) + '\n'
 
+        return Response(reply_text)
+
+async def cmd_sv(self, channel, author, leftover_args):
+    """
+    Usage:
+        {command_prefix}sv <item name>,r%#
+
+    The bot queries for item give the item name.
+    -r indicates refine rate
+    % takes three different forms gt,lt,eq
+    # indicates the number of refine we are comparing
+    eg. req5 => refine equaled to 5
+    eg. rgt5 => refine greater than or equaled to 5
+    """
+    replacements = {
+        '@id': '',
+        '@rop': '',
+        '@rfn': '',
+        '@name': '',
+        '@page': '',
+        '@action': 'item'
+                }
+
+    refine_opts = {
+        'req': 'eq',
+        'rlt': 'lt',
+        'rgt': 'gt',
+        'r=': 'eq',
+        'r>': 'gt',
+        'r<': 'lt'
+    }
+
+
+
+    if not leftover_args:
+        return
+
+    else:
+        itemid = True
+        full_args = ' '.join(leftover_args).split(',')
+        args = [query.split() for query in full_args]
+        print(args)
+        
+
+        if args[0][0].isdigit():
+            print("go to item id site")
+            replacements['@id'] = args[0][0]
+            print(replacements['@id'])
+            market_title_display = "Live Market Data"
+
+        else:
+            print("go to search site")
+            replacements['@name'] = '+'.join(leftover_args)
+            print(replacements['@name'])
+            itemid = False
+
+        for sub_query in args[1:]:
+            if sub_query[0] in refine_opts and len(sub_query) == 2:
+                replacements['@rop'] = refine_opts[sub_query[0]] if sub_query[0] in refine_opts else ''
+                replacements['@rfn'] = sub_query[1] if sub_query[1] and sub_query[1].isdigit() else ''
+
+            elif sub_query[0] == 'p' and len(sub_query) == 2:
+                replacements['@page'] = sub_query[1] if sub_query[1].isdigit() else ''
+
+            elif sub_query[0] == 'h' or sub_query[0] == 'his':
+                replacements['@item'] = 'itemhistory'
+                market_title_display = "Transaction History"
+
+        print(replacements)
+
+
+
+        if itemid:
+            used_url = VEND_URL
+        else:
+            used_url = VEND_ITEM_URL
+
+
+        rep = dict((re.escape(k), v) for k, v in replacements.items())
+        pattern = re.compile("|".join(rep.keys()))
+        result_url = pattern.sub(lambda m: rep[re.escape(m.group(0))], used_url)
+        print(result_url)
+
+        # URL REQUEST
+
+        # LOGIN STAGE
+        session_requests = requests.session()
+        result = session_requests.post(LOGIN_URL, data = login_info, headers = dict(referer = LOGIN_URL))
+
+        # SCRAPPING STAGE
+        result = session_requests.get(result_url, headers = dict(referer = result_url))
+        tree = html.fromstring(result.content)
+        vend = tree.xpath("//table[@class='horizontal-table']")
+        print(vend)
+
+        if not vend:
+            return Response("No items found")
+       
+        
+        reply_text = ''
+
+        if itemid:
+            market_history = []
+            live_market_data = []
+            no_live_market = False
+            # turning the whole table into a 2D array
+            # we want everything so we have a lot of wildcards
+            # one thing to figure out is to group a series of text under the same tr
+            # into one text instead of having separate element for each matched item
+            for tr in vend[0].xpath(".//tr"):
+                market_history.append([i.strip() for i in tr.xpath("./*/text()|./*/*/text()")])
+
+            try: 
+                for tr in vend[1].xpath(".//tr"):
+                    live_market_data.append([i.strip() for i in tr.xpath("./*/text()|./*/*/text()")])
+                print(vend[1].xpath("./*"))
+            except IndexError:
+                no_live_market = True
+
+            
+            # print(market_history)
+            # print(live_market_data)
+
+
+
+            reply_text = "Market History\n--------------\n"
+            reply_text += '\n'.join([', '.join(i) for i in market_history])
+            reply_text += "\n\n\n" + market_title_display + "\n----------------\n"
+
+            if not no_live_market:
+                reply_text += '\n'.join([', '.join(i) for i in live_market_data])
+            else:
+                reply_text += "No items found"
+
+
+        else:
+            search_list = []
+            for tr in vend[0].xpath("./tr"):
+                search_list.append([i.strip() for i in tr.xpath("./*/text()|./*/a/text()")])
+            # print(search_list)
+
+            reply_text = "Search Results\n--------------\n"
+            reply_text += '\n'.join([', '.join(i) for i in search_list])
+
+
+
+        print(reply_text)
         return Response(reply_text)
