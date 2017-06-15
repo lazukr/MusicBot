@@ -503,6 +503,7 @@ async def cmd_sv(self, channel, author, leftover_args):
             itemid = False
 
         for sub_query in args[1:]:
+            print(sub_query)
             if sub_query[0] in refine_opts and len(sub_query) == 2:
                 replacements['@rop'] = refine_opts[sub_query[0]] if sub_query[0] in refine_opts else ''
                 replacements['@rfn'] = sub_query[1] if sub_query[1] and sub_query[1].isdigit() else ''
@@ -511,7 +512,7 @@ async def cmd_sv(self, channel, author, leftover_args):
                 replacements['@page'] = sub_query[1] if sub_query[1].isdigit() else ''
 
             elif sub_query[0] == 'h' or sub_query[0] == 'his':
-                replacements['@item'] = 'itemhistory'
+                replacements['@action'] = "itemhistory"
                 market_title_display = "Transaction History"
 
         print(replacements)
